@@ -1,0 +1,30 @@
+name = "hearth-tv"
+main = "server/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Workers Static Assets: the built SPA is served by the same Worker that hosts
+# the API, so there is exactly one deploy target and zero CORS between them.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hearth-tv"
+database_id = "PLACEHOLDER_RUN_npm_run_db_create"
+
+[[durable_objects.bindings]]
+name = "REMOTE_ROOM"
+class_name = "RemoteRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RemoteRoom"]
+
+[observability]
+enabled = true
+
+[vars]
+APP_NAME = "Hearth"

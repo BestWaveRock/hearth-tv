@@ -1,0 +1,32 @@
+# Headers for statically-served assets.
+#
+# Cloudflare's asset server answers matching asset requests *without* invoking
+# the Worker, so the `secureHeaders()` middleware in server/index.ts never runs
+# for the HTML document. This file covers that gap.
+#
+# The CSP below is written against the real build output, not guessed at:
+# `dist/index.html` contains no inline <script>, so `script-src 'self'` is safe.
+
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cross-Origin-Opener-Policy: same-origin
+  X-DNS-Prefetch-Control: off
+
+  # Every feature this app actually needs must be listed: a Permissions-Policy
+  # that omits a feature *denies* it. `hid` and `bluetooth` are the remote
+  # drivers, `gamepad` is the air-mouse path, and `autoplay` is what lets a
+  # video start without a click — which is the whole point of a TV.
+  Permissions-Policy: bluetooth=(self), hid=(self), gamepad=(self), autoplay=(self), fullscreen=(self), serial=(), usb=(), camera=(), microphone=(), geolocation=()
+
+  # style-src needs 'unsafe-inline' because the interface computes colours from
+  # artwork at runtime via React style props.
+  # img-src needs data: for the QR code and https: for OpenList thumbnails.
+  # media-src needs https: because OpenList streams are a 302 to the provider's CDN.
+  # worker-src needs blob: because hls.js runs its demuxer in a blob Worker.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' ws: wss: https:; worker-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+# Hashed bundles are immutable by construction, so they can be cached forever.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

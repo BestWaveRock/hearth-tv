@@ -1,0 +1,41 @@
+{
+  "name": "hearth-tv",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Hearth TV OS — a tvOS-inspired television operating system that runs entirely in the browser, driven by a real remote control.",
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "wrangler dev --port 8787",
+    "build": "vite build",
+    "typecheck": "tsc -b",
+    "preview": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "npm run typecheck && node tools/test-focus.mjs",
+    "test:focus": "node tools/test-focus.mjs",
+    "test:remote": "node tools/test-remote.mjs",
+    "mock:webdav": "node tools/mock-webdav.mjs",
+    "db:create": "wrangler d1 create hearth-tv",
+    "db:migrate": "wrangler d1 execute hearth-tv --remote --file=./schema.sql",
+    "db:migrate:local": "wrangler d1 execute hearth-tv --local --file=./schema.sql",
+    "secret:key": "node -e \"console.log(Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64'))\""
+  },
+  "dependencies": {
+    "hls.js": "^1.7.1",
+    "hono": "^4.13.3",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260823.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "wrangler": "^4.125.0"
+  }
+}
