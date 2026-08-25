@@ -83,7 +83,7 @@ jobs:
               echo
               echo "| Secret | Where to get it |"
               echo "| --- | --- |"
-              echo "| \`CLOUDFLARE_API_TOKEN\` | An API token with *Edit Cloudflare Workers* and *D1 Edit* |"
+              echo "| \`CLOUDFLARE_API_TOKEN\` | A **custom** token with Workers Scripts:Edit, D1:Edit, Workers KV:Edit, Account Settings:Read. The \"Edit Cloudflare Workers\" template does NOT include D1 and will fail. |"
               echo "| \`CLOUDFLARE_ACCOUNT_ID\` | The Account ID in your Cloudflare dashboard sidebar |"
               echo
               echo "You also need a D1 database id in \`wrangler.toml\` — run \`npm run db:create\`."

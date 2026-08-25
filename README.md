@@ -146,10 +146,37 @@ npx wrangler secret put ALLOW_SIGNUP   # enter: false
 ### Continuous deployment
 
 `.github/workflows/deploy.yml` typechecks, tests, builds and deploys on every push to
-`main`. Add two repository secrets under **Settings → Secrets and variables → Actions**:
+`main`. It also **creates the D1 database and the encryption key for you** on the first
+successful run, so the only manual step is adding two repository secrets under
+**Settings → Secrets and variables → Actions**:
 
-- `CLOUDFLARE_API_TOKEN` — a token with *Edit Cloudflare Workers* plus *D1 Edit*
-- `CLOUDFLARE_ACCOUNT_ID` — from your Cloudflare dashboard sidebar
+| Secret | Where to get it |
+| --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | The **Account ID** in your Cloudflare dashboard sidebar (not a Zone ID) |
+| `CLOUDFLARE_API_TOKEN` | A custom token — see below |
+
+> **The token needs D1, and the ready-made template does not include it.**
+>
+> The **“Edit Cloudflare Workers”** template will authenticate successfully and then fail
+> with `Authentication error [code: 10000]` the moment it touches D1. Use
+> [**Create Custom Token**](https://dash.cloudflare.com/profile/api-tokens) instead, with:
+>
+> | Scope | Resource | Level |
+> | --- | --- | --- |
+> | Account | **Workers Scripts** | Edit |
+> | Account | **D1** | Edit |
+> | Account | **Workers KV Storage** | Edit |
+> | Account | **Account Settings** | Read |
+>
+> The workflow prints `wrangler whoami` before provisioning, so the log always shows which
+> account and token it is actually using.
+
+Once deployed, set the vault key only if you want to control it yourself — otherwise CI
+generates one and never rotates it:
+
+```bash
+npx wrangler secret put ENCRYPTION_KEY
+```
 
 ---
 
