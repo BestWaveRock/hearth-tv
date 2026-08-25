@@ -66,37 +66,47 @@ function parseJson(output) {
   return null;
 }
 
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/** Finds the database's id by name, or null if it does not exist yet. */
+function findDatabaseId() {
+  const listed = parseJson(wrangler(['d1', 'list', '--json'], { allowFailure: true }));
+  if (!Array.isArray(listed)) return null;
+  const match = listed.find((db) => db.name === DB_NAME);
+  return match?.uuid ?? match?.database_id ?? null;
+}
+
 function ensureDatabase() {
   console.log(`Looking for D1 database "${DB_NAME}"…`);
 
-  const listed = parseJson(wrangler(['d1', 'list', '--json'], { allowFailure: true }));
-  let uuid = Array.isArray(listed)
-    ? listed.find((db) => db.name === DB_NAME)?.uuid ?? null
-    : null;
+  let uuid = findDatabaseId();
 
   if (uuid) {
     console.log(`Found existing database (${uuid}).`);
   } else {
     console.log('Not found — creating it.');
-    const created = parseJson(wrangler(['d1', 'create', DB_NAME, '--json']));
-    uuid = created?.uuid ?? created?.database_id ?? null;
+
+    // `wrangler d1 create` has no --json flag (only `d1 list` does), so the id
+    // is read out of the wrangler.toml snippet it prints, with a re-list as a
+    // fallback in case that output format ever changes.
+    const output = wrangler(['d1', 'create', DB_NAME]);
+    const fromToml = output.match(/database_id\s*=\s*"([^"]+)"/);
+    uuid = fromToml?.[1] ?? output.match(UUID_RE)?.[0] ?? null;
 
     if (!uuid) {
-      // Some wrangler versions do not honour --json on create; re-list.
-      const relisted = parseJson(wrangler(['d1', 'list', '--json'], { allowFailure: true }));
-      uuid = Array.isArray(relisted)
-        ? relisted.find((db) => db.name === DB_NAME)?.uuid ?? null
-        : null;
+      console.log('Could not read the id from the creation output; re-listing.');
+      uuid = findDatabaseId();
     }
     if (!uuid) throw new Error('Created the database but could not determine its id.');
     console.log(`Created database (${uuid}).`);
   }
 
+  if (!UUID_RE.test(uuid)) {
+    throw new Error(`Resolved database id does not look like a UUID: ${uuid}`);
+  }
+
   const toml = readFileSync(WRANGLER_TOML, 'utf8');
-  const patched = toml.replace(
-    /database_id\s*=\s*"[^"]*"/,
-    `database_id = "${uuid}"`,
-  );
+  const patched = toml.replace(/database_id\s*=\s*"[^"]*"/, `database_id = "${uuid}"`);
 
   if (patched === toml && !toml.includes(uuid)) {
     throw new Error(`Could not find a database_id line to update in ${WRANGLER_TOML}.`);
@@ -113,10 +123,17 @@ function ensureKey() {
   console.log('Checking whether the Worker already has ENCRYPTION_KEY…');
 
   // A brand-new Worker has no secret list at all; that is not an error here.
-  const listed = parseJson(wrangler(['secret', 'list'], { allowFailure: true }));
-  const names = Array.isArray(listed) ? listed.map((s) => s.name) : [];
+  const output = wrangler(['secret', 'list'], { allowFailure: true });
+  const listed = parseJson(output);
 
-  if (names.includes('ENCRYPTION_KEY')) {
+  // Prefer structured output, but fall back to a plain text search: guessing
+  // wrong here would silently rotate the key, and that destroys stored
+  // credentials. When in doubt, treat the key as present and do nothing.
+  const present = Array.isArray(listed)
+    ? listed.some((s) => s?.name === 'ENCRYPTION_KEY')
+    : output.includes('ENCRYPTION_KEY');
+
+  if (present) {
     console.log('ENCRYPTION_KEY is already set — leaving it untouched.');
     console.log('(Rotating it would make stored storage credentials undecryptable.)');
     return;
@@ -125,7 +142,7 @@ function ensureKey() {
   console.log('No ENCRYPTION_KEY found. Generating a 32-byte key.');
   const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
 
-  // Piped on stdin so the value never appears in an argv or in the logs.
+  // Piped on stdin so the value never appears in argv or in the logs.
   wrangler(['secret', 'put', 'ENCRYPTION_KEY'], { stdin: key });
   console.log('ENCRYPTION_KEY set. It exists only in Cloudflare’s secret store.');
 }
