@@ -1,5 +1,5 @@
-import type { Entry } from '../../shared/types';
-import { basicAuth } from '../crypto';
+import type { Entry } from '../types.ts';
+import { basicAuth } from './crypto.ts';
 import {
   type Adapter,
   type SourceContext,
@@ -13,7 +13,7 @@ import {
   joinUrl,
   normalisePath,
   sortEntries,
-} from './util';
+} from './util.ts';
 
 /* ------------------------------------------------------------------ *
  * A namespace-agnostic XML reader.

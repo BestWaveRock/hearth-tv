@@ -1,0 +1,110 @@
+name: Publish image
+
+# Builds the container for amd64 and arm64 and publishes it to the GitHub
+# Container Registry. GHCR is used by default because it needs nothing beyond
+# the token GitHub already has — no marketplace, no Docker Hub credentials. If
+# DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets are present, the same image is
+# mirrored to Docker Hub as well.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'src/**'
+      - 'server/**'
+      - 'server-node/**'
+      - 'shared/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'schema.sql'
+      - '.dockerignore'
+      - '.github/workflows/publish-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for Docker Hub credentials
+        id: hub
+        env:
+          HUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$HUB_USER" ] && [ -n "$HUB_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Docker Hub mirror skipped::Publishing to GHCR only. Add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN to also mirror there."
+          fi
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=
+            type=semver,pattern={{version}}
+          flavor: |
+            latest=auto
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Optional mirror to Docker Hub, only when the caller configured secrets.
+      - name: Log in to Docker Hub (if configured)
+        if: steps.hub.outputs.ready == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Mirror to Docker Hub (if configured)
+        if: steps.hub.outputs.ready == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/hearth-tv:latest
+          cache-from: type=gha
+
+      - name: Report image
+        run: |
+          {
+            echo "### Image published"
+            echo
+            echo "Pull it with:"
+            echo
+            echo '```'
+            echo 'docker pull ghcr.io/${{ github.repository }}:latest'
+            echo '```'
+            echo
+            echo "Multi-arch: linux/amd64 and linux/arm64."
+          } >> "$GITHUB_STEP_SUMMARY"

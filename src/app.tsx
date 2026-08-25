@@ -8,6 +8,7 @@ import { TopBar } from './components/TopBar';
 import { engine } from './focus';
 import { input } from './input/manager';
 import { dismissTop } from './lib/dismiss';
+import { enterFullscreen, installBrowserGuards, isFullscreen, isNativeShell } from './lib/guards';
 import { useT } from './lib/i18n';
 import { AuthScreen } from './screens/Auth';
 import { BrowseScreen } from './screens/Browse';
@@ -51,6 +52,10 @@ function TvShell() {
   const [controlCentre, setControlCentre] = useState(false);
 
   /* --------------------------- boot sequence --------------------------- */
+
+  // Strip out the document-shaped browser behaviours (right-click menus, zoom,
+  // swipe-back) that a remote can trigger by accident.
+  useEffect(() => installBrowserGuards(), []);
 
   useEffect(() => {
     void input.start();
@@ -163,6 +168,23 @@ function TvShell() {
   );
 
   useEffect(() => input.onAction((event) => handleAction(event.action)), [handleAction]);
+
+  /**
+   * Honour the immersive-fullscreen preference.
+   *
+   * `requestFullscreen` requires user activation, so it cannot be called on load.
+   * A remote button press *is* user activation, so the first action after boot is
+   * the earliest legitimate moment. The native macOS wrapper manages its own
+   * window, so it is left alone.
+   */
+  useEffect(() => {
+    if (!settings.fullscreen || isNativeShell()) return;
+    const off = input.onAction(() => {
+      if (!isFullscreen()) void enterFullscreen();
+      off();
+    });
+    return off;
+  }, [settings.fullscreen]);
 
   /* ---------------------------- screensaver ---------------------------- */
 

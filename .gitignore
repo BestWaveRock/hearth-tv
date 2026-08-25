@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-server/
 .wrangler/
 .dev.vars
 .dev.vars.*
@@ -16,3 +17,9 @@ dist/
 npm-debug.log*
 yarn-error.log*
 *.log
+dist-macos/
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+encryption.key

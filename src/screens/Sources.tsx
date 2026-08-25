@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { MediaRole, SourceInput, SourceKind, SourceSummary } from '../../shared/types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { AccessMode, MediaRole, SourceInput, SourceKind, SourceSummary } from '../../shared/types';
 import { Field } from '../components/Field';
 import { Button, Chip, EmptyState, Row, Segments, Spinner } from '../components/primitives';
 import { FocusGroup, FocusScope } from '../focus';
+import {
+  directModeBlocker,
+  proxyModeBlocker,
+  suggestAccessMode,
+  supportsDirect,
+} from '../../shared/sources/reachability';
+import { sanitiseBaseUrl } from '../../shared/sources/util';
 import { ApiError, api } from '../lib/api';
+import { testSourceConnection } from '../lib/media';
 import { useDismissable } from '../lib/dismiss';
 import { formatRelative } from '../lib/format';
 import { useT, type T } from '../lib/i18n';
@@ -90,7 +98,7 @@ export function SourcesScreen() {
     async (source: SourceSummary) => {
       setTesting(source.id);
       try {
-        const res = await api.testSource(source.id);
+        const res = await testSourceConnection(source);
         toast(`${source.name}: ${res.message}`, res.ok ? 'good' : 'bad');
       } catch (err) {
         toast(err instanceof ApiError ? err.message : t('src.testFail'), 'bad');
@@ -150,6 +158,9 @@ export function SourcesScreen() {
                 tail={
                   <>
                     {testing === source.id ? <Spinner /> : null}
+                    <Chip>
+                      {source.access === 'direct' ? t('src.modeDirect') : t('src.modeProxy')}
+                    </Chip>
                     {source.lastError ? (
                       <Chip tone="bad">{t('src.problem')}</Chip>
                     ) : source.lastOkAt ? (
@@ -221,6 +232,9 @@ function SourceDialog({
   const [baseUrl, setBaseUrl] = useState(source?.baseUrl ?? '');
   const [rootPath, setRootPath] = useState(source?.rootPath ?? '/');
   const [media, setMedia] = useState<MediaRole>(source?.media ?? 'video');
+  const [access, setAccess] = useState<AccessMode>(source?.access ?? 'proxy');
+  /** Cleared once the user picks a mode themselves, so we stop overriding them. */
+  const [accessTouched, setAccessTouched] = useState(source !== null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [token, setToken] = useState('');
@@ -235,12 +249,59 @@ function SourceDialog({
   // Back closes the dialog instead of popping out of the Sources screen.
   useDismissable(onClose, busy === null);
 
+  const origin = typeof location === 'undefined' ? '' : location.origin;
+  const directAllowed = supportsDirect(kind);
+
+  /**
+   * Suggest a mode from the address the user is typing.
+   *
+   * Typing a `192.168.x.x` address and then being told the server cannot reach it
+   * is a bad experience when the answer — direct mode — is already known. This
+   * flips the default once, and stops as soon as the user chooses for themselves.
+   */
+  useEffect(() => {
+    if (accessTouched || !baseUrl.trim() || !directAllowed) return;
+    const suggested = suggestAccessMode(baseUrl.trim(), kind);
+    if (suggested !== access) setAccess(suggested);
+  }, [baseUrl, kind, accessTouched, directAllowed, access]);
+
+  // Keep WebDAV out of a mode it cannot support, even if switched after the fact.
+  useEffect(() => {
+    if (!directAllowed && access === 'direct') setAccess('proxy');
+  }, [directAllowed, access]);
+
+  /** Whichever rule currently rules this address out, phrased for a human. */
+  const addressWarning = useMemo(() => {
+    const url = baseUrl.trim();
+    if (!url) return null;
+    let normalised: string;
+    try {
+      normalised = sanitiseBaseUrl(url);
+    } catch {
+      return null;
+    }
+
+    if (access === 'direct') {
+      const blocker = directModeBlocker(origin, normalised, kind);
+      if (blocker?.code === 'mixed-content') return t('src.access.mixedContent');
+      if (blocker?.code === 'kind-unsupported') return t('src.access.directWebdav');
+      return null;
+    }
+
+    const blocker = proxyModeBlocker(origin, normalised);
+    if (blocker?.code === 'private-from-cloud') {
+      return directAllowed ? t('src.access.suggestDirect') : t('src.privateAddress');
+    }
+    return null;
+  }, [baseUrl, access, kind, origin, directAllowed, t]);
+
   const body = (): SourceInput => ({
     kind,
     name: name.trim() || meta.name,
     baseUrl,
     rootPath: meta.usesRootPath ? rootPath : '/',
     media,
+    access,
     // Blank fields are omitted on edit so a stored password is not wiped by
     // someone renaming the source.
     ...(username || isNew ? { username } : {}),
@@ -253,7 +314,16 @@ function SourceDialog({
     setResult(null);
     setError(null);
     try {
-      if (isNew || password || username || token) {
+      if (access === 'direct') {
+        // Direct mode has to be tested from the browser, because that is the
+        // code path the media will actually take. Asking the server would prove
+        // nothing: it cannot reach a LAN address, and it is not subject to CORS.
+        if (isNew || password || username || token) {
+          setResult({ ok: false, message: t('src.saveThenTestDirect') });
+        } else {
+          setResult(await testSourceConnection(source));
+        }
+      } else if (isNew || password || username || token) {
         setResult(await api.testDraft(body()));
       } else {
         setResult(await api.testSource(source.id));
@@ -397,6 +467,43 @@ function SourceDialog({
                 ]}
               />
               <p className="field__hint">{t('src.mediaHint')}</p>
+            </div>
+
+            {/* The access mode. This is the choice that decides whether a NAS on
+                the local network can be used at all, so it explains itself
+                inline rather than hiding behind a tooltip. */}
+            <div className="stack stack-xs">
+              <p className="t-label">{t('src.access')}</p>
+              {directAllowed ? (
+                <Segments
+                  ariaLabel={t('src.access')}
+                  value={access}
+                  onChange={(next) => {
+                    setAccess(next);
+                    setAccessTouched(true);
+                    setResult(null);
+                  }}
+                  options={[
+                    { value: 'proxy', label: t('src.access.proxy') },
+                    { value: 'direct', label: t('src.access.direct') },
+                  ]}
+                />
+              ) : (
+                <p className="field__hint">{t('src.access.directWebdav')}</p>
+              )}
+
+              <p className="field__hint">
+                {access === 'direct' ? t('src.access.directHint') : t('src.access.proxyHint')}
+              </p>
+
+              {/* Live diagnosis of the address as it is typed. */}
+              {addressWarning ? <p className="field__error">{addressWarning}</p> : null}
+
+              {access === 'direct' && !addressWarning ? (
+                <p className="field__hint">
+                  {t('src.access.corsHelp')} <code className="warm">{origin}</code>
+                </p>
+              ) : null}
             </div>
           </div>
 

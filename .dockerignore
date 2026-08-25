@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-server
+.wrangler
+.dev.vars
+.dev.vars.*
+.git
+.github
+data
+*.log
+.DS_Store
+tools/test-*

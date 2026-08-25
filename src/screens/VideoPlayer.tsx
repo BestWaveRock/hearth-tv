@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FocusScope, engine, useFocusable } from '../focus';
 import { input } from '../input/manager';
 import type { ActionEvent } from '../input/types';
-import { api, streamUrl } from '../lib/api';
+import { api } from '../lib/api';
+import { resolveStreamUrl } from '../lib/media';
 import { formatTime } from '../lib/format';
 import { useT } from '../lib/i18n';
 import { useApp } from '../store/app';
@@ -108,39 +109,55 @@ export function VideoPlayer() {
     const el = videoRef.current;
     if (!el) return;
 
-    const src = streamUrl(item.sourceId, item.entry.path);
     setError(null);
     setWaiting(true);
     setPosition(video.startAt);
     setDuration(0);
 
     let destroyHls: (() => void) | undefined;
+    let cancelled = false;
 
-    if (item.entry.ext === 'm3u8' || src.includes('.m3u8')) {
-      // Safari plays HLS natively; everywhere else needs hls.js, imported here
-      // so it never lands in the initial bundle.
-      if (el.canPlayType('application/vnd.apple.mpegurl')) {
-        el.src = src;
-      } else {
-        void import('hls.js').then(({ default: Hls }) => {
-          if (!Hls.isSupported()) {
-            setError('This browser cannot play HLS streams.');
+    // Resolving the URL is asynchronous in direct mode: OpenList must be asked
+    // for a fresh pre-signed link. `cancelled` stops a slow resolve for a
+    // skipped-past episode from hijacking the element.
+    void resolveStreamUrl(item.sourceId, item.entry.path)
+      .then((src) => {
+        if (cancelled) return;
+
+        if (item.entry.ext === 'm3u8' || src.includes('.m3u8')) {
+          // Safari plays HLS natively; everywhere else needs hls.js, imported
+          // here so it never lands in the initial bundle.
+          if (el.canPlayType('application/vnd.apple.mpegurl')) {
+            el.src = src;
             return;
           }
-          const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
-          hls.loadSource(src);
-          hls.attachMedia(el);
-          hls.on(Hls.Events.ERROR, (_evt, data) => {
-            if (data.fatal) setError(`Stream error: ${data.details}`);
+          return import('hls.js').then(({ default: Hls }) => {
+            if (cancelled) return;
+            if (!Hls.isSupported()) {
+              setError('This browser cannot play HLS streams.');
+              return;
+            }
+            const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+            hls.loadSource(src);
+            hls.attachMedia(el);
+            hls.on(Hls.Events.ERROR, (_evt, data) => {
+              if (data.fatal) setError(`Stream error: ${data.details}`);
+            });
+            destroyHls = () => hls.destroy();
           });
-          destroyHls = () => hls.destroy();
-        });
-      }
-    } else {
-      el.src = src;
-    }
+        }
+        el.src = src;
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Could not open that file.');
+        setWaiting(false);
+      });
 
-    return () => destroyHls?.();
+    return () => {
+      cancelled = true;
+      destroyHls?.();
+    };
   }, [item.sourceId, item.entry.path, item.entry.ext, video.startAt]);
 
   /* ---------------------------- persistence ---------------------------- */

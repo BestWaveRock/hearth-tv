@@ -31,6 +31,8 @@ const shell = {
   'control.home': { en: 'Home', zh: '首页' },
   'control.sources': { en: 'Sources', zh: '媒体源' },
   'control.settings': { en: 'Settings', zh: '设置' },
+  'control.fullscreen': { en: 'Fullscreen', zh: '全屏' },
+  'control.exitFullscreen': { en: 'Exit fullscreen', zh: '退出全屏' },
   'control.close': { en: 'Close', zh: '关闭' },
   'control.hint': {
     en: 'Menu or a long press on OK opens this at any time.',
@@ -337,6 +339,52 @@ const settings = {
   'set.encryptionKey': { en: 'encryption key', zh: '加密密钥' },
   'set.checkingServer': { en: 'Checking the server…', zh: '正在检查服务器…' },
   'set.signOut': { en: 'Sign out', zh: '退出登录' },
+
+  /* --- access mode: proxy vs direct --------------------------------- */
+  'src.access': { en: 'How to connect', zh: '连接方式' },
+  'src.access.proxy': { en: 'Via Hearth (public)', zh: '经 Hearth 代理（公网）' },
+  'src.access.direct': { en: 'Direct (same network)', zh: '直连（同一局域网）' },
+  'src.access.proxyHint': {
+    en: 'Hearth’s server fetches your media and passes it on. Works from anywhere, and your password never leaves the server — but the address must be reachable from the public internet.',
+    zh: 'Hearth 服务器代为拉取媒体再转发给你。任何网络都能用，密码也不会离开服务器；但地址必须能从公网访问。',
+  },
+  'src.access.directHint': {
+    en: 'Your browser connects to the server itself. This is the one that works for a NAS on your home network: full local speed, and nothing leaves the house. The server must allow this site in its CORS settings.',
+    zh: '由浏览器直接连接服务器。家里的 NAS 只能用这种方式：满速本地传输，数据完全不出家门。需要在服务器的 CORS 设置里允许本站。',
+  },
+  'src.access.directWebdav': {
+    en: 'WebDAV cannot be used in Direct mode — it authenticates with a header, and a video element cannot send headers. Put OpenList in front of it, or use Proxy access.',
+    zh: 'WebDAV 无法用于直连模式：它通过请求头认证，而视频元素无法发送请求头。可以在它前面套一层 OpenList，或改用代理模式。',
+  },
+  'src.access.suggestDirect': {
+    en: 'That looks like a local address, so Direct access has been selected — Hearth’s server could not reach it.',
+    zh: '这看起来是内网地址，因此已自动选择直连模式——Hearth 服务器无法访问它。',
+  },
+  'src.access.mixedContent': {
+    en: 'This page is HTTPS, and browsers block plain HTTP requests from an HTTPS page. Give the server HTTPS, or run Hearth locally over HTTP.',
+    zh: '本页面是 HTTPS，而浏览器会拦截 HTTPS 页面发出的 HTTP 请求。请为服务器配置 HTTPS，或在本地以 HTTP 方式运行 Hearth。',
+  },
+  'src.access.corsHelp': {
+    en: 'If the test fails, allow this origin on your server:',
+    zh: '如果测试失败，请在服务器上允许此来源：',
+  },
+  'src.testingDirect': { en: 'Testing from this browser…', zh: '正在从此浏览器测试…' },
+  'src.testingProxy': { en: 'Testing from Hearth’s server…', zh: '正在从 Hearth 服务器测试…' },
+  'src.saveThenTestDirect': {
+    en: 'Save the source first, then test. A direct connection is made by this browser using the stored credentials, so they must exist before it can be tried.',
+    zh: '请先保存，再进行测试。直连由本浏览器使用已保存的凭据发起，因此需要先保存凭据。',
+  },
+  'src.modeProxy': { en: 'Proxy', zh: '代理' },
+  'src.modeDirect': { en: 'Direct', zh: '直连' },
+  'src.privateAddress': {
+    en: 'That is a private address, and Hearth’s server runs on Cloudflare’s edge, so it cannot reach your local network. Expose the service publicly over HTTPS, or use a source type that supports Direct access.',
+    zh: '这是内网地址，而 Hearth 服务器运行在 Cloudflare 边缘节点，无法访问你的局域网。请将服务通过 HTTPS 暴露到公网，或改用支持直连的媒体源类型。',
+  },
+
+  'home.directUnreachable': {
+    en: 'Could not be reached from this browser. Check that you are on the same network, and that the server allows this site.',
+    zh: '此浏览器无法访问。请确认处于同一网络，并且服务器已允许本站访问。',
+  },
   'set.deleteAccount': { en: 'Delete account', zh: '删除账户' },
   'set.deleteTitle': { en: 'Delete this account?', zh: '确定删除此账户？' },
   'set.deleteBody': {

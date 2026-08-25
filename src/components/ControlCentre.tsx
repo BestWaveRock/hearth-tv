@@ -1,5 +1,6 @@
 import { FocusScope } from '../focus';
 import { useDismissable } from '../lib/dismiss';
+import { isFullscreen, toggleFullscreen } from '../lib/guards';
 import { useApp } from '../store/app';
 import { usePlayback } from '../store/playback';
 import { Bars, Button, Chip } from './primitives';
@@ -75,6 +76,14 @@ export function ControlCentre({ onClose }: { onClose: () => void }) {
             <Button onSelect={go(goHome)}>{t('control.home')}</Button>
             <Button onSelect={go(() => replace({ name: 'sources' }))}>{t('control.sources')}</Button>
             <Button onSelect={go(() => replace({ name: 'settings' }))}>{t('control.settings')}</Button>
+            <Button
+              onSelect={() => {
+                void toggleFullscreen();
+                void setSettings({ fullscreen: !isFullscreen() });
+              }}
+            >
+              {isFullscreen() ? t('control.exitFullscreen') : t('control.fullscreen')}
+            </Button>
             <Button
               variant="ghost"
               onSelect={() => void setSettings({ reduceMotion: !settings.reduceMotion })}

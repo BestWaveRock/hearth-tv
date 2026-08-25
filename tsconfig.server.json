@@ -11,6 +11,8 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "noEmit": true,
+    // shared/ uses explicit .ts specifiers so Node can run that graph directly.
+    "allowImportingTsExtensions": true,
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo",
     "types": ["@cloudflare/workers-types"]

@@ -8,6 +8,7 @@ import { ApiError, api, type HomeResponse } from '../lib/api';
 import { greeting } from '../lib/format';
 import { useT } from '../lib/i18n';
 import { useOpenEntry } from '../lib/open';
+import { canUseDirect, shelvesForDirectSource } from '../lib/media';
 import { useApp } from '../store/app';
 import { usePlayback } from '../store/playback';
 
@@ -37,7 +38,31 @@ export function HomeScreen() {
     setLoading(true);
     try {
       const res = await api.home();
-      setData(res);
+
+      // The Worker cannot reach a direct-mode source, so those shelves are built
+      // here in the browser and merged in. Both halves are fetched in parallel;
+      // a NAS that is asleep delays only its own shelf.
+      const directSources = useApp
+        .getState()
+        .sources.filter((s) => canUseDirect(s));
+
+      const directShelves = (
+        await Promise.all(directSources.map((s) => shelvesForDirectSource(s)))
+      ).flat();
+
+      const missing = directSources
+        .filter((s) => !directShelves.some((shelf) => shelf.sourceId === s.id))
+        .map((s) => ({
+          sourceId: s.id,
+          name: s.name,
+          message: t('home.directUnreachable'),
+        }));
+
+      setData({
+        ...res,
+        shelves: [...res.shelves, ...directShelves],
+        problems: [...res.problems, ...missing],
+      });
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('home.loadFail.title'));

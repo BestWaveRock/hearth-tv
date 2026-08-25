@@ -1,15 +1,15 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import { HTTPException } from 'hono/http-exception';
-import type { SourceKind, SourceSummary, MediaRole } from '../../shared/types';
+import type { AccessMode, MediaRole, SourceKind, SourceSummary } from '../../shared/types';
 import { unseal } from '../crypto';
 import type { Env } from '../env';
-import { openlistAdapter } from './openlist';
-import { subsonicAdapter } from './subsonic';
-import { webdavAdapter } from './webdav';
-import type { Adapter, Credentials, SourceContext } from './util';
+import { openlistAdapter } from '../../shared/sources/openlist';
+import { subsonicAdapter } from '../../shared/sources/subsonic';
+import { webdavAdapter } from '../../shared/sources/webdav';
+import type { Adapter, Credentials, SourceContext } from '../../shared/sources/util';
 
-export * from './util';
+export * from '../../shared/sources/util';
 
 export interface SourceRow {
   id: string;
@@ -19,6 +19,7 @@ export interface SourceRow {
   base_url: string;
   root_path: string;
   media: MediaRole;
+  access: AccessMode;
   secret_blob: string;
   sort_order: number;
   last_ok_at: number | null;
@@ -65,6 +66,7 @@ export async function rowToSummary(vault: CryptoKey, row: SourceRow): Promise<So
       baseUrl: row.base_url,
       rootPath: row.root_path,
       media: row.media,
+      access: row.access ?? 'proxy',
       hasCredentials: false,
       usernameMasked: null,
       lastOkAt: row.last_ok_at,
@@ -81,6 +83,7 @@ export async function rowToSummary(vault: CryptoKey, row: SourceRow): Promise<So
     baseUrl: row.base_url,
     rootPath: row.root_path,
     media: row.media,
+    access: row.access ?? 'proxy',
     hasCredentials: Boolean(creds.password || creds.token),
     usernameMasked: maskUsername(creds.username),
     lastOkAt: row.last_ok_at,
@@ -124,6 +127,10 @@ export async function loadContext(
   return contextFromRow(row, creds);
 }
 
+/**
+ * Adapters are transport-agnostic: the same context drives a Worker-side fetch
+ * and a browser-side fetch. Only the caller differs.
+ */
 export function contextFromRow(row: SourceRow, creds: Credentials): SourceContext {
   return {
     id: row.id,

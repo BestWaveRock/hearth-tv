@@ -1,4 +1,4 @@
-import type { Entry, EntryKind, MediaRole, SourceKind } from '../../shared/types';
+import type { Entry, EntryKind, MediaRole, SourceKind } from '../types.ts';
 
 export interface Credentials {
   username?: string;
@@ -220,17 +220,36 @@ export function joinUrl(base: string, ...segments: string[]): string {
 }
 
 /** Strips credentials and trailing slashes from user-entered server URLs. */
+/**
+ * Strips credentials and trailing slashes from a user-entered server address.
+ *
+ * When no scheme is given, one is inferred from the host: a LAN address such as
+ * `192.168.1.50:5244` almost never has a certificate, so defaulting it to
+ * `https://` would produce a confusing TLS failure. Public hostnames default to
+ * `https://`, which is what they should be using.
+ */
 export function sanitiseBaseUrl(raw: string): string {
   let s = raw.trim();
   if (!s) throw new Error('Server address is required.');
-  if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+
+  if (!/^https?:\/\//i.test(s)) {
+    const hostPart = s.split('/')[0].split('@').pop() ?? s;
+    const host = hostPart.replace(/:\d+$/, '').toLowerCase();
+    const looksPrivate =
+      /^(10\.|127\.|192\.168\.|169\.254\.)/.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      host === 'localhost' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal');
+    s = (looksPrivate ? 'http://' : 'https://') + s;
+  }
+
   const u = new URL(s);
   u.username = '';
   u.password = '';
   u.hash = '';
   u.search = '';
-  let out = u.toString().replace(/\/+$/, '');
-  return out;
+  return u.toString().replace(/\/+$/, '');
 }
 
 /* ------------------------------- sorting ------------------------------ */

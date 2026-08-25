@@ -7,6 +7,7 @@ import { FocusGroup } from '../focus';
 import { ApiError, api, type SearchGroup } from '../lib/api';
 import { useT } from '../lib/i18n';
 import { useOpenEntry } from '../lib/open';
+import { canUseDirect, searchSource } from '../lib/media';
 import { useApp } from '../store/app';
 
 /**
@@ -40,8 +41,26 @@ export function SearchScreen() {
       setLoading(true);
       setError(null);
       try {
-        const res = await api.search(q);
-        setGroups(res.results);
+        // Proxy sources are searched by the Worker. Direct sources have to be
+        // searched from the browser, because the Worker cannot reach them at all.
+        // Both halves run in parallel, so a sleeping NAS does not hold up the
+        // results from everything else.
+        const directSources = useApp.getState().sources.filter((s) => canUseDirect(s));
+        const [proxyRes, directResults] = await Promise.all([
+          api.search(q),
+          Promise.all(
+            directSources.map(async (source) => ({
+              sourceId: source.id,
+              sourceName: source.name,
+              entries: await searchSource(source, q),
+            })),
+          ),
+        ]);
+
+        setGroups([
+          ...proxyRes.results,
+          ...directResults.filter((group) => group.entries.length > 0),
+        ]);
         setSearched(true);
       } catch (err) {
         setError(err instanceof ApiError ? err.message : 'Search failed.');

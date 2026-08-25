@@ -47,18 +47,41 @@ export interface RemoteProfile {
 export type SourceKind = 'webdav' | 'navidrome' | 'openlist';
 export type MediaRole = 'video' | 'music' | 'both';
 
+/**
+ * How the bytes get from the storage server to the screen.
+ *
+ * `proxy`  — the Worker talks to the server. Works from anywhere on the
+ *            internet, credentials never leave the server, and CORS is a
+ *            non-issue because the browser only ever talks to our own origin.
+ *            Requires the storage server to be reachable from Cloudflare's
+ *            network, so a LAN address will not work.
+ *
+ * `direct` — the browser talks to the server itself, with no hop through the
+ *            Worker. This is what makes a LAN NAS usable: full local bandwidth,
+ *            nothing leaves the house, and no proxy in the path. In exchange the
+ *            storage server must send CORS headers, and the browser's
+ *            mixed-content rule applies (see `directModeBlocker`).
+ */
+export type AccessMode = 'proxy' | 'direct';
+
 export interface SourceInput {
   kind: SourceKind;
   name: string;
   baseUrl: string;
   rootPath?: string;
   media?: MediaRole;
+  access?: AccessMode;
   username?: string;
   password?: string;
   token?: string;
 }
 
-/** Server -> client shape. Deliberately contains no secret material. */
+/**
+ * Server -> client shape.
+ *
+ * Contains no secret material. Credentials for a `direct` source are fetched
+ * separately and deliberately, via `GET /api/sources/:id/credentials`.
+ */
 export interface SourceSummary {
   id: string;
   kind: SourceKind;
@@ -66,12 +89,20 @@ export interface SourceSummary {
   baseUrl: string;
   rootPath: string;
   media: MediaRole;
+  access: AccessMode;
   hasCredentials: boolean;
   usernameMasked: string | null;
   lastOkAt: number | null;
   lastError: string | null;
   createdAt: number;
   sortOrder: number;
+}
+
+/** Plaintext credentials, only ever returned for a `direct` source. */
+export interface SourceCredentials {
+  username?: string;
+  password?: string;
+  token?: string;
 }
 
 export interface User {

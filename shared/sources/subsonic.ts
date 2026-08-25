@@ -1,5 +1,5 @@
-import type { Entry } from '../../shared/types';
-import { b64, randomBytes, subsonicToken } from '../crypto';
+import type { Entry } from '../types.ts';
+import { b64, randomBytes, subsonicToken } from './crypto.ts';
 import {
   type Adapter,
   type Shelf,
@@ -7,7 +7,7 @@ import {
   type StreamTarget,
   fetchWithTimeout,
   normalisePath,
-} from './util';
+} from './util.ts';
 
 /**
  * Navidrome speaks the Subsonic API, so this adapter also works with Gonic,

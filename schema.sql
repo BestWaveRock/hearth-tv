@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS sources (
   base_url    TEXT NOT NULL,
   root_path   TEXT NOT NULL DEFAULT '/',
   media       TEXT NOT NULL DEFAULT 'video',  -- video | music | both
+  -- proxy  = the Worker fetches (works anywhere, needs a public address)
+  -- direct = the browser fetches (works on a LAN, needs CORS on the server)
+  access      TEXT NOT NULL DEFAULT 'proxy',
   -- AES-256-GCM ciphertext of {"username":"…","password":"…","token":"…"}.
   -- The plaintext never leaves the Worker and is never returned to a client.
   secret_blob TEXT NOT NULL,
@@ -90,3 +93,13 @@ CREATE TABLE IF NOT EXISTS settings (
   json        TEXT NOT NULL,
   updated_at  INTEGER NOT NULL
 );
+
+-- ---------------------------------------------------------------------------
+-- Migrations for databases created before a column existed.
+--
+-- D1 has no "ADD COLUMN IF NOT EXISTS", and re-running the CREATE TABLE above
+-- does nothing once the table exists. These statements are applied by
+-- tools/migrate.mjs, which tolerates the "duplicate column" error so that
+-- running them repeatedly is safe.
+--
+-- @migration ALTER TABLE sources ADD COLUMN access TEXT NOT NULL DEFAULT 'proxy';

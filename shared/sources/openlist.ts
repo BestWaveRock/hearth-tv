@@ -1,4 +1,4 @@
-import type { Entry } from '../../shared/types';
+import type { Entry } from '../types.ts';
 import {
   type Adapter,
   type SourceContext,
@@ -11,7 +11,7 @@ import {
   isHidden,
   normalisePath,
   sortEntries,
-} from './util';
+} from './util.ts';
 
 /**
  * OpenList (and its predecessor Alist) aggregates dozens of cloud drives

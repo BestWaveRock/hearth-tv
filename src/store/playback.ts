@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Entry } from '../../shared/types';
-import { api, streamUrl } from '../lib/api';
+import { api } from '../lib/api';
+import { resolveStreamUrl } from '../lib/media';
 
 export interface PlayItem {
   sourceId: string;
@@ -232,15 +233,36 @@ function reportAudioError(err: unknown): void {
   usePlayback.setState({ audioError: message, playing: false });
 }
 
+/**
+ * Resolving a stream URL is asynchronous in direct mode: OpenList has to be asked
+ * for a fresh pre-signed link, and Subsonic credentials must be read first. The
+ * generation counter guards against a slow resolve for a skipped-past track
+ * overwriting the source of the one now playing.
+ */
+let loadGeneration = 0;
+
 function loadCurrent(autoplay: boolean): void {
   const state = usePlayback.getState();
   const item = state.currentTrack();
   if (!audio || !item) return;
 
-  audio.src = streamUrl(item.sourceId, item.entry.path);
-  audio.load();
+  const generation = ++loadGeneration;
   updateMediaSession(item);
-  if (autoplay) void audio.play().catch(reportAudioError);
+
+  void resolveStreamUrl(item.sourceId, item.entry.path)
+    .then((url) => {
+      if (generation !== loadGeneration || !audio) return;
+      audio.src = url;
+      audio.load();
+      if (autoplay) void audio.play().catch(reportAudioError);
+    })
+    .catch((err: unknown) => {
+      if (generation !== loadGeneration) return;
+      usePlayback.setState({
+        playing: false,
+        audioError: err instanceof Error ? err.message : 'Could not resolve that track.',
+      });
+    });
 }
 
 /* --------------------------- element wiring ---------------------------- */

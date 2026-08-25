@@ -88,15 +88,18 @@ export const PHONE_DEFAULTS: RemoteMapping = Object.fromEntries(
 );
 
 /**
- * Consumer Control usages (HID usage page 0x0C). When a remote exposes a
- * Consumer Control collection, WebHID *can* read it, and these are the usage
- * codes the buttons report. This gives many remotes a working map with no
- * calibration at all.
+ * Consumer Control usages (HID usage page 0x0C).
+ *
+ * These are defined by the HID specification, so a remote's Back, Home and
+ * Play buttons can be *understood* rather than memorised. The WebHID driver
+ * decodes Consumer Control reports into `hid:consumer:0x…` codes, which these
+ * entries then map — so a stock TV remote works with no calibration, and the
+ * buttons macOS swallows (and never delivers as key events) still get through.
  */
 export const HID_CONSUMER_USAGES: Record<number, RemoteAction> = {
-  0x0042: 'menu', // Menu Up
   0x0040: 'menu', // Menu
   0x0041: 'select', // Menu Pick
+  0x0042: 'up', // Menu Up
   0x0043: 'down', // Menu Down
   0x0044: 'left', // Menu Left
   0x0045: 'right', // Menu Right
@@ -112,13 +115,46 @@ export const HID_CONSUMER_USAGES: Record<number, RemoteAction> = {
   0x00e9: 'volumeUp',
   0x00ea: 'volumeDown',
   0x0221: 'menu', // AC Search
-  0x0224: 'back', // AC Back
-  0x0225: 'forward', // AC Forward
   0x0223: 'home', // AC Home
+  0x0224: 'back', // AC Back — what an Android TV remote's Back button sends
+  0x0225: 'forward', // AC Forward
+};
+
+/** The decoded-usage codes the WebHID driver emits, mapped to actions. */
+export const HID_DEFAULTS: RemoteMapping = Object.fromEntries(
+  Object.entries(HID_CONSUMER_USAGES).map(([usage, action]) => [
+    `hid:consumer:0x${Number(usage).toString(16)}`,
+    action,
+  ]),
+);
+
+/**
+ * Extra key codes seen from Android TV and Xiaomi remotes when they are paired
+ * to a computer as a Bluetooth keyboard.
+ *
+ * macOS translates a remote's D-pad and OK to arrows and Enter, but the other
+ * buttons vary by vendor. These are the codes those buttons produce in practice;
+ * none of them collides with a key used for text entry, so mapping them by
+ * default is safe.
+ */
+export const TV_REMOTE_KEY_DEFAULTS: RemoteMapping = {
+  // Several Android TV remotes report Back as Delete rather than Escape.
+  'kb:Delete': 'back',
+  // Xiaomi's Home button, when the OS forwards it at all.
+  'kb:BrowserSearch': 'menu',
+  'kb:BrowserFavorites': 'menu',
+  'kb:LaunchApplication1': 'home',
+  'kb:LaunchApplication2': 'home',
+  // Some remotes send F-keys for their coloured / shortcut buttons.
+  'kb:F2': 'back',
+  'kb:F3': 'home',
+  'kb:F4': 'playpause',
 };
 
 export const DEFAULT_MAPPING: RemoteMapping = {
   ...KEYBOARD_DEFAULTS,
+  ...TV_REMOTE_KEY_DEFAULTS,
+  ...HID_DEFAULTS,
   ...GAMEPAD_DEFAULTS,
   ...PHONE_DEFAULTS,
 };

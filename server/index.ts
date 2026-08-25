@@ -6,13 +6,16 @@ import { secureHeaders } from 'hono/secure-headers';
 
 import {
   DEFAULT_SETTINGS,
+  type AccessMode,
   type Entry,
   type Listing,
   type MediaRole,
   type RemoteProfile,
   type Settings,
+  type SourceCredentials,
   type SourceSummary,
 } from '../shared/types';
+import { proxyModeBlocker, supportsDirect } from '../shared/sources/reachability';
 import type { AppEnv, Env } from './env';
 import { deleteCookie } from 'hono/cookie';
 import {
@@ -241,6 +244,7 @@ interface SourceBody {
   baseUrl?: unknown;
   rootPath?: unknown;
   media?: unknown;
+  access?: unknown;
   username?: unknown;
   password?: unknown;
   token?: unknown;
@@ -248,31 +252,23 @@ interface SourceBody {
 
 /**
  * A Worker deployed to Cloudflare runs in their network and physically cannot
- * open a socket to a RFC1918 address. Saying so up front prevents a baffling
- * timeout later.
+ * open a socket to a RFC1918 address, so a LAN address in *proxy* mode is a
+ * guaranteed timeout. Saying so up front is far kinder than the timeout.
  *
- * The check is skipped during local development, where workerd *can* reach the
- * LAN — otherwise you could not develop against your own NAS.
+ * In *direct* mode a LAN address is the entire point — the browser does the
+ * fetching, from inside the network — so the check does not apply.
+ *
+ * It is also skipped during local development, where workerd genuinely can
+ * reach the LAN.
  */
-function assertReachableHost(baseUrl: string, requestUrl: string): void {
-  const requestHost = new URL(requestUrl).hostname;
-  const isLocalDev =
-    requestHost === 'localhost' || requestHost === '127.0.0.1' || requestHost === '[::1]';
-  if (isLocalDev) return;
-
-  const host = new URL(baseUrl).hostname;
-  const isPrivate =
-    /^(10\.|127\.|0\.|169\.254\.|192\.168\.)/.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-    host === 'localhost' ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal');
-
-  if (isPrivate) {
+function assertProxyReachable(baseUrl: string, requestUrl: string): void {
+  if (proxyModeBlocker(new URL(requestUrl).origin, baseUrl)?.code === 'private-from-cloud') {
+    const host = new URL(baseUrl).hostname;
     throw new HTTPException(400, {
       message:
-        `“${host}” is a private address. This server runs on Cloudflare's edge and cannot reach your ` +
-        `local network. Expose the service over HTTPS (a Cloudflare Tunnel is the usual way), then use that hostname.`,
+        `“${host}” is a private address, and this server runs on Cloudflare's edge, so it cannot reach ` +
+        `your local network. Either switch this source to Direct access, so your browser connects to it from ` +
+        `inside the network, or expose the service publicly over HTTPS (a Cloudflare Tunnel is the usual way).`,
     });
   }
 }
@@ -297,7 +293,6 @@ function parseSourceBody(body: SourceBody, requestUrl: string, partial = false) 
         message: e instanceof Error ? e.message : 'That server address is not a valid URL.',
       });
     }
-    assertReachableHost(baseUrl, requestUrl);
   } else if (!partial) {
     throw new HTTPException(400, { message: 'Server address is required.' });
   }
@@ -308,12 +303,30 @@ function parseSourceBody(body: SourceBody, requestUrl: string, partial = false) 
       ? (body.media as MediaRole)
       : undefined;
 
+  const access: AccessMode | undefined =
+    body.access === 'direct' || body.access === 'proxy' ? body.access : undefined;
+
+  const effectiveKind = isSourceKind(kind) ? kind : undefined;
+
+  // Direct mode requires the browser to authenticate a media element from the
+  // URL alone, which WebDAV cannot do.
+  if (access === 'direct' && effectiveKind && !supportsDirect(effectiveKind)) {
+    throw new HTTPException(400, {
+      message:
+        'WebDAV cannot be used in Direct mode: it authenticates with a header, and a video element cannot send headers. Use Proxy access for WebDAV, or use OpenList in front of it.',
+    });
+  }
+
+  // Only proxy sources must be reachable from Cloudflare.
+  if (baseUrl && access !== 'direct') assertProxyReachable(baseUrl, requestUrl);
+
   return {
     kind: isSourceKind(kind) ? kind : undefined,
     name: nameRaw || undefined,
     baseUrl,
     rootPath: typeof body.rootPath === 'string' ? normalisePath(body.rootPath) : undefined,
     media,
+    access,
     creds: {
       username: typeof body.username === 'string' ? body.username : undefined,
       password: typeof body.password === 'string' ? body.password : undefined,
@@ -347,8 +360,8 @@ api.post('/sources', requireAuth, async (c) => {
   }
 
   await c.env.DB.prepare(
-    `INSERT INTO sources (id, user_id, kind, name, base_url, root_path, media, secret_blob, sort_order, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO sources (id, user_id, kind, name, base_url, root_path, media, access, secret_blob, sort_order, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
@@ -358,6 +371,7 @@ api.post('/sources', requireAuth, async (c) => {
       parsed.baseUrl!,
       parsed.rootPath ?? '/',
       parsed.media ?? defaultMedia,
+      parsed.access ?? 'proxy',
       await seal(vault, parsed.creds),
       count?.n ?? 0,
       now,
@@ -404,7 +418,7 @@ api.patch('/sources/:id', requireAuth, async (c) => {
   }
 
   await c.env.DB.prepare(
-    `UPDATE sources SET kind = ?, name = ?, base_url = ?, root_path = ?, media = ?, secret_blob = ?, last_error = NULL
+    `UPDATE sources SET kind = ?, name = ?, base_url = ?, root_path = ?, media = ?, access = ?, secret_blob = ?, last_error = NULL
       WHERE id = ? AND user_id = ?`,
   )
     .bind(
@@ -413,6 +427,7 @@ api.patch('/sources/:id', requireAuth, async (c) => {
       parsed.baseUrl ?? row.base_url,
       parsed.rootPath ?? row.root_path,
       parsed.media ?? row.media,
+      parsed.access ?? row.access ?? 'proxy',
       secretBlob,
       id,
       user.id,
@@ -461,6 +476,54 @@ api.post('/sources/test', requireAuth, async (c) => {
   } catch (e) {
     return c.json({ ok: false, message: e instanceof Error ? e.message : 'Connection failed.' }, 200);
   }
+});
+
+/**
+ * Hands the browser the plaintext credentials for a **direct** source.
+ *
+ * This is the one place secrets travel back to a client, so the rules are
+ * strict and worth stating:
+ *
+ *  - Only for `access = 'direct'`. A proxy source's credentials never leave the
+ *    Worker, because nothing in the browser needs them.
+ *  - Only to the authenticated owner of that row.
+ *  - Never cached, by us or by any intermediary.
+ *
+ * The trade-off is deliberate. Direct mode exists so the browser can talk to a
+ * NAS on the local network, and it cannot authenticate to that NAS without the
+ * password. The alternative — keeping the password only in the browser that
+ * created it — would break the promise that signing in restores your sources on
+ * any computer. Every response here is `no-store`, the transport is HTTPS, and
+ * the strict CSP in `public/_headers` is what keeps an injected script from
+ * reading it.
+ */
+api.get('/sources/:id/credentials', requireAuth, async (c) => {
+  const user = c.get('user');
+  const vault = await getVault(c);
+
+  const row = await c.env.DB.prepare('SELECT * FROM sources WHERE id = ? AND user_id = ?')
+    .bind(c.req.param('id'), user.id)
+    .first<SourceRow>();
+  if (!row) throw new HTTPException(404, { message: 'Source not found.' });
+
+  if ((row.access ?? 'proxy') !== 'direct') {
+    throw new HTTPException(403, {
+      message:
+        'This source uses Proxy access, so its credentials stay on the server. Switch it to Direct access if the browser needs to connect itself.',
+    });
+  }
+
+  let creds: SourceCredentials;
+  try {
+    creds = await unseal<SourceCredentials>(vault, row.secret_blob);
+  } catch {
+    throw new HTTPException(409, {
+      message: `Credentials for “${row.name}” could not be decrypted. Open Settings and re-enter them.`,
+    });
+  }
+
+  c.header('Cache-Control', 'no-store, private, max-age=0');
+  return c.json({ credentials: creds });
 });
 
 api.post('/sources/:id/test', requireAuth, async (c) => {
@@ -1038,6 +1101,12 @@ app.all('*', async (c) => {
   // (the security headers) needs to add to it, so re-wrap it as a mutable copy.
   return new Response(res.body, res);
 });
+
+/**
+ * Exported so the self-hosted Node server in `server-node/` can mount exactly the
+ * same routes. One route table, two runtimes.
+ */
+export { app };
 
 export default {
   fetch: app.fetch,

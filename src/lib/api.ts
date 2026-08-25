@@ -5,6 +5,7 @@ import type {
   ProgressRow,
   RemoteProfile,
   Settings,
+  SourceCredentials,
   SourceInput,
   SourceSummary,
   User,
@@ -121,6 +122,9 @@ export const api = {
   deleteSource: (id: string) => del<{ ok: true }>(`/api/sources/${id}`),
   testDraft: (body: SourceInput) => post<{ ok: boolean; message: string }>('/api/sources/test', body),
   testSource: (id: string) => post<{ ok: boolean; message: string }>(`/api/sources/${id}/test`),
+  /** Only succeeds for direct-mode sources; see the route comment on the server. */
+  sourceCredentials: (id: string) =>
+    request<{ credentials: SourceCredentials }>(`/api/sources/${id}/credentials`),
 
   browse: (sourceId: string, path: string) =>
     request<Listing>(`/api/browse?src=${encodeURIComponent(sourceId)}&path=${encodeURIComponent(path)}`),

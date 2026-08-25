@@ -89,6 +89,94 @@ Hearth 是一个运行在浏览器里的电视系统，完全用遥控器操作�
 
 ---
 
+## Quick start
+
+Three ways to run it. **Self-hosting is the recommended one**, and not for ideological
+reasons — a browser refuses to load `http://` content from an `https://` page, so the
+hosted version physically cannot talk to a NAS at `http://192.168.x.x`. Served from your
+own network over HTTP, it can.
+
+### 1. Container — recommended
+
+```bash
+docker run -d --name hearth \
+  -p 8788:8788 \
+  -v hearth-data:/data \
+  --restart unless-stopped \
+  ghcr.io/bestwaverock/hearth-tv:latest
+```
+
+Then open **http://localhost:8788**.
+
+The image is multi-arch (`linux/amd64` + `linux/arm64`), needs no configuration, and
+generates its own credential-vault key into `/data` on first start. Keep that volume:
+losing it makes saved data-source passwords unreadable.
+
+#### Apple `container` (no Docker Desktop needed)
+
+Apple's own container runtime on macOS 15+ runs the same image:
+
+```bash
+container system start
+container run -d --name hearth \
+  -p 8788:8788 \
+  -v hearth-data:/data \
+  ghcr.io/bestwaverock/hearth-tv:latest
+```
+
+To reach it from other devices on your network, publish on all interfaces and use the
+machine's LAN address, e.g. `http://192.168.3.10:8788`.
+
+#### Docker Compose
+
+```yaml
+services:
+  hearth:
+    image: ghcr.io/bestwaverock/hearth-tv:latest
+    container_name: hearth
+    ports: ['8788:8788']
+    volumes: ['hearth-data:/data']
+    restart: unless-stopped
+volumes:
+  hearth-data:
+```
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `PORT` | `8788` | Listen port |
+| `DATA_DIR` | `/data` | SQLite database and the vault key |
+| `ENCRYPTION_KEY` | generated | Base64 of 32 bytes; supply your own to control it |
+| `ALLOW_SIGNUP` | open | Set to `false` once your account exists |
+| `PBKDF2_ITERATIONS` | `100000` | Lower it on very slow hardware |
+
+### 2. macOS app
+
+A native shell: immersive fullscreen, no tab strip, no URL bar, and no right-click menu
+for a remote to trigger by accident.
+
+```bash
+git clone https://github.com/BestWaveRock/hearth-tv.git
+cd hearth-tv
+./macos/build.sh              # needs only: xcode-select --install
+open dist-macos/Hearth.app
+```
+
+It looks for a local server on `http://localhost:8788` and falls back to the hosted
+deployment if there is none. Point it anywhere:
+
+```bash
+open -a dist-macos/Hearth.app --args --url http://192.168.3.10:8788
+open -a dist-macos/Hearth.app --args --windowed        # skip fullscreen
+./macos/build.sh --universal                           # arm64 + x86_64
+```
+
+### 3. Hosted on Cloudflare
+
+Zero infrastructure, reachable from anywhere — but it can only read data sources that are
+themselves reachable from the public internet. See [Setting it up](#setting-it-up).
+
+---
+
 ## Setting it up
 
 You need a free [Cloudflare](https://dash.cloudflare.com/sign-up) account. The whole thing
@@ -213,15 +301,60 @@ OpenList is the fastest of the three: `/api/fs/get` returns a pre-signed URL on 
 provider's own CDN, and Hearth `302`s the browser straight there, so video never transits the
 Worker at all.
 
-### ⚠️ Private addresses will not work
+### Two ways to connect: Proxy or Direct
+
+Every source is one of two access modes, and picking the right one is the difference
+between "it works" and "it times out".
+
+| | **Proxy** | **Direct** |
+| --- | --- | --- |
+| Who fetches | Hearth's server | Your browser |
+| Works with a LAN address | ✗ | ✓ |
+| Works from anywhere | ✓ | only on that network |
+| Needs CORS on your server | ✗ | ✓ |
+| Password reaches the browser | ✗ | ✓ |
+| Bandwidth | via the server | full local speed |
+| Supported types | all three | OpenList, Navidrome |
+
+Hearth picks a mode from the address you type — a private IP selects Direct automatically —
+and tells you inline when a combination cannot work.
+
+**Why WebDAV cannot do Direct mode:** it authenticates with an `Authorization` header, and
+a `<video>` element cannot send headers. OpenList returns a pre-signed URL and Navidrome
+accepts its token as a query parameter, so both are fine. Put OpenList in front of a
+WebDAV share if you need it on a LAN.
+
+**The one hard limit on Direct mode.** A browser refuses to load `http://` from an
+`https://` page — this is mixed-content blocking, it cannot be disabled, and it is not
+something Hearth can work around. So:
+
+| Hearth is served from | Your server is | Direct mode |
+| --- | --- | --- |
+| `http://localhost:8788` (self-hosted) | `http://192.168.x.x` | ✓ works |
+| `https://…workers.dev` (hosted) | `http://192.168.x.x` | ✗ blocked by the browser |
+| `https://…workers.dev` (hosted) | `https://nas.example.com` | ✓ works |
+
+This is exactly why self-hosting is the recommended path for a home setup.
+
+**Good news on CORS:** both OpenList and Navidrome ship with
+`Access-Control-Allow-Origin: *` on their APIs, so Direct mode needs **no server
+configuration at all**. Verified against OpenList and Navidrome 0.63.
+
+
+### ⚠️ Private addresses in Proxy mode
 
 A deployed Worker runs in Cloudflare's network and **cannot** open a socket to `192.168.x.x`,
 `10.x.x.x` or `nas.local`. Hearth detects this and says so rather than leaving you with a
 mysterious timeout.
 
-Expose the service over HTTPS first — a
-[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
-is the usual way, and it needs no open ports — then use that hostname.
+Three ways out, in order of how little work they are:
+
+1. **Self-host Hearth** (the container above) and use **Direct** mode. Nothing to expose.
+2. Use **Direct** mode with a hostname that has a real certificate — Tailscale, or
+   `nas.example.com` with a DNS-01 issued cert pointing at a private IP.
+3. Expose the service publicly over HTTPS with a
+   [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+   and keep using **Proxy** mode.
 
 *(During `npm run dev` the check is skipped, because a local `workerd` **can** reach your LAN.)*
 
@@ -261,9 +394,22 @@ server/                Hono on Cloudflare Workers
     subsonic.ts        Navidrome, via virtual browsing paths
     openlist.ts        Alist/OpenList, with CDN redirects
 
+server-node/           the same routes, self-hosted
+  index.ts             Node entry point; swaps three bindings and nothing else
+  d1-sqlite.ts         D1-compatible shim over node:sqlite (no native module)
+  assets.ts            the built SPA off disk, Range-aware
+  rooms.ts             phone pairing in memory instead of Durable Objects
+
+macos/                 native shell
+  Hearth.swift         WKWebView, immersive fullscreen, no chrome
+  build.sh             produces a .app with only the Xcode CLT
+
 src/
   focus/engine.ts      spatial navigation (DOM-free geometry, tested)
   input/               five drivers behind one normalised action stream
+  lib/direct.ts        Direct-mode transport (browser -> storage server)
+  lib/media.ts         one access layer over both transports
+  lib/guards.ts        suppresses browser behaviour a remote can trigger
   screens/             pairing, auth, home, browse, player, settings…
   styles/              the design system
 ```
@@ -279,7 +425,13 @@ and both self-closing and paired `<collection>` forms.
 
 **Static assets bypass the Worker.** Cloudflare serves matching assets without invoking your
 script, so `secureHeaders()` never runs for the HTML document. `public/_headers` covers that
-gap, including a CSP written against the real build output.
+gap, including a CSP written against the real build output. In the self-hosted deployment
+assets *do* go through Hono, so the same headers apply with no extra file.
+
+**One adapter set, two callers.** `shared/sources/` is imported by both the Worker and the
+browser. Two implementations of the Subsonic auth dance would inevitably drift, and "works
+in Proxy mode but not Direct" would become a whole class of bug that simply cannot exist
+when there is only one implementation.
 
 ---
 
@@ -295,6 +447,12 @@ npm run dev:api                     # API on :8787 (separate terminal)
 
 `vite.config.ts` proxies `/api` from 5173 to 8787, WebSockets included.
 
+To run the self-hosted server exactly as the container does:
+
+```bash
+npm run dev:node        # builds the SPA + server bundle, then serves on :8788
+```
+
 To exercise everything without owning a NAS:
 
 ```bash
@@ -306,14 +464,84 @@ Add a WebDAV source pointing at `http://127.0.0.1:4918/dav`, user `demo`, passwo
 ### Tests
 
 ```bash
-npm test                # typecheck both projects + navigation tests
+npm test                # typecheck everything + navigation + reachability
 npm run test:focus      # 33 spatial navigation cases
-npm run test:remote     # phone-pairing Durable Object, end to end
+npm run test:reach      # 41 mixed-content / private-network rules
+npm run test:remote     # phone pairing, end to end, incl. security properties
+npm run test:direct     # Direct mode against a running self-hosted server
+npm run test:live       # the adapters against real OpenList / Navidrome installs
+```
+
+`test:live` takes its credentials from the environment so they are never written to disk:
+
+```bash
+OPENLIST_URL=http://192.168.3.10:5244 OPENLIST_USER=admin OPENLIST_PASS=… \
+NAVIDROME_URL=http://192.168.3.10:4533 NAVIDROME_USER=me NAVIDROME_PASS=… \
+npm run test:live
 ```
 
 `test:remote` needs a running server and a signed-in session cookie; it checks the security
 properties too — that a phone cannot join a room with no TV, that an unauthenticated client
 cannot claim the TV role, and that a phone cannot spoof what is on screen.
+
+---
+
+## Making your remote work
+
+Hearth suppresses the browser behaviours a remote triggers by accident: right-click menus
+(a Menu button often maps to the context-menu key), page zoom, text selection,
+drag-and-drop, and swipe-to-go-back. That is all handled in `src/lib/guards.ts`.
+
+### Buttons that cannot be intercepted, and why
+
+Two categories of key never reach a web page at all, because macOS (and Windows) consume
+them in the HID subsystem before any application is consulted:
+
+| Button | What happens | Can a web page stop it? |
+| --- | --- | --- |
+| **Volume +/−, Mute** | Adjusts *system* volume | **No.** No event is delivered, so there is nothing to `preventDefault()`. |
+| **Power / Sleep** | Sleeps the computer | **No.** Same reason. |
+
+This is not a missing feature — an application is not permitted to override a machine's
+hardware keys, and that is the correct design. What actually works:
+
+- **Use WebHID.** It reads the remote's raw HID reports and bypasses the OS key mapping
+  entirely, so those buttons become available to Hearth. Pair via *WebHID device* on the
+  pairing screen. Chromium only.
+- **Let system volume be system volume.** For a TV this is arguably right: one volume
+  control, and it works even when the app is not focused.
+- **Use the app's own volume**, in Control Centre, for anything else.
+
+### Xiaomi Bluetooth Remote 2 Pro (and other Android TV remotes)
+
+The D-pad, OK and Play/Pause arrive as ordinary key events once the remote is paired in
+macOS Bluetooth settings, and work immediately. The rest depends on what macOS chooses to
+forward:
+
+| Button | Usually arrives as | Status |
+| --- | --- | --- |
+| D-pad, OK | Arrows, Enter | Works out of the box |
+| Back | AC Back (`0x224`) — often swallowed by macOS | **Use WebHID**, or calibrate |
+| Home | AC Home (`0x223`) — often swallowed | **Use WebHID**, or calibrate |
+| Power | System Sleep | Consumed by macOS; cannot be used |
+| Volume | Consumer volume | Consumed by macOS; use WebHID |
+| Voice / microphone | Vendor-specific, no web API | Not supported by any browser |
+
+Hearth now **decodes HID Consumer Control usages by name**, so through WebHID a remote's
+Back, Home, Play and transport buttons map themselves with no calibration — those usages
+are defined by the HID specification rather than invented per vendor.
+
+If a button still does nothing:
+
+1. Open **Settings → Remote control** and watch the **live input monitor**.
+2. Press the button. If a code appears marked *not mapped*, run **Recalibrate** and assign
+   it — the mapping syncs to your account and applies on every computer.
+3. If **nothing at all** appears, the operating system swallowed it. Connect the remote
+   through *WebHID device* on the pairing screen and try again.
+
+Voice input is not implemented and cannot be: no browser exposes a remote's microphone
+stream, and the Xiaomi remote's voice button is a vendor protocol with no web equivalent.
+Use the phone remote for text entry instead — it has a real keyboard.
 
 ---
 

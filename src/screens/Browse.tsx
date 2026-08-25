@@ -4,7 +4,8 @@ import { Shelf } from '../components/Shelf';
 import { Tile } from '../components/Tile';
 import { Bars, Button, EmptyState, Row, SkeletonShelf } from '../components/primitives';
 import { FocusGroup } from '../focus';
-import { ApiError, api } from '../lib/api';
+import { ApiError } from '../lib/api';
+import { browseSource } from '../lib/media';
 import { formatBytes, formatTime } from '../lib/format';
 import { useT } from '../lib/i18n';
 import { useOpenEntry } from '../lib/open';
@@ -52,7 +53,7 @@ export function BrowseScreen({
     setLoading(true);
     setError(null);
     try {
-      setListing(await api.browse(sourceId, path));
+      setListing(await browseSource(sourceId, path));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('browse.openFail.title'));
     } finally {

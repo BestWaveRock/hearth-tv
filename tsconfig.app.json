@@ -14,6 +14,8 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "noEmit": true,
+    // shared/ uses explicit .ts specifiers so Node can run that graph directly.
+    "allowImportingTsExtensions": true,
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "types": ["vite/client"]
