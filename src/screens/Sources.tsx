@@ -437,10 +437,13 @@ function SourceDialog({
               value={password}
               onChange={setPassword}
               kind="password"
-              placeholder={
-                source?.hasCredentials ? t('src.passwordStored') : '••••••••'
+              placeholder={source?.hasCredentials ? t('src.passwordStored') : '••••••••'}
+              hint={
+                // Overwriting a stored credential is destructive, so it is stated
+                // plainly the moment the box is non-empty rather than discovered
+                // afterwards.
+                !isNew && password ? t('src.passwordReplaceWarning') : t('src.passwordHint')
               }
-              hint={t('src.passwordHint')}
             />
 
             {meta.tokenLabel ? (

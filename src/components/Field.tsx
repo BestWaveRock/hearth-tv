@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { FocusScope, useFocusable } from '../focus';
 import { input } from '../input/manager';
 import { useDismissable } from '../lib/dismiss';
@@ -193,6 +193,13 @@ export function Field({
   const t = useT();
   const [oskOpen, setOskOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fieldId = useId();
+  /**
+   * Password managers autofill on page load, before anything is focused. Keeping
+   * the input read-only until it is actually focused makes Chrome and Safari skip
+   * it, and is the only part of this defence that works in every browser.
+   */
+  const [editable, setEditable] = useState(false);
 
   const f = useFocusable<HTMLDivElement>({
     disabled,
@@ -200,16 +207,34 @@ export function Field({
     onSelect: () => setOskOpen(true),
     // Handing DOM focus to the inner input is what makes a physical keyboard
     // work without a second code path.
-    onFocus: () => inputRef.current?.focus({ preventScroll: true }),
-    onBlur: () => inputRef.current?.blur(),
+    onFocus: () => {
+      setEditable(true);
+      inputRef.current?.focus({ preventScroll: true });
+    },
+    onBlur: () => {
+      inputRef.current?.blur();
+      setEditable(false);
+    },
   });
 
-  const inputType = kind === 'password' ? 'password' : kind === 'url' ? 'url' : 'text';
-  const autoComplete = useMemo(() => {
-    if (kind === 'password') return 'current-password';
-    if (kind === 'url') return 'url';
-    return 'off';
-  }, [kind]);
+  const inputType = kind === 'password' ? 'password' : 'text';
+
+  /**
+   * Autofill suppression — a correctness fix, not a cosmetic one.
+   *
+   * These fields hold credentials for *someone else's server*, not a login for
+   * this site. With `autocomplete="current-password"` the browser treated the
+   * data-source password box as Hearth's own login box and filled in the
+   * account password. Because autofill dispatches a real `input` event, that
+   * value reached React state and would have been saved — silently replacing the
+   * stored server password with the wrong secret.
+   *
+   * `new-password` is what tells a browser "never offer a saved credential
+   * here". The non-semantic `name`, the vendor opt-outs and the read-only trick
+   * cover the managers that ignore it.
+   */
+  const autoComplete = kind === 'password' ? 'new-password' : 'off';
+  const fieldName = `hearth-${kind}-${fieldId.replace(/[^a-zA-Z0-9]/g, '')}`;
 
   return (
     <div className="field">
@@ -220,11 +245,22 @@ export function Field({
           type={inputType}
           value={value}
           placeholder={placeholder}
+          name={fieldName}
+          id={fieldName}
           autoComplete={autoComplete}
+          // Read-only until focused, so page-load autofill skips it entirely.
+          readOnly={!editable}
           spellCheck={false}
           autoCapitalize="off"
+          autoCorrect="off"
           disabled={disabled}
+          // Vendor opt-outs: 1Password, LastPass, Bitwarden, Dashlane.
+          data-1p-ignore="true"
+          data-lpignore="true"
+          data-bwignore="true"
+          data-form-type="other"
           onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setEditable(true)}
           // The engine owns navigation; a click should open the OSK, not
           // silently do nothing on a machine with no keyboard.
           onDoubleClick={() => setOskOpen(true)}

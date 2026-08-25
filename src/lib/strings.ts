@@ -376,6 +376,10 @@ const settings = {
   },
   'src.modeProxy': { en: 'Proxy', zh: '代理' },
   'src.modeDirect': { en: 'Direct', zh: '直连' },
+  'src.passwordReplaceWarning': {
+    en: 'This will replace the stored password when you save. Clear the box to keep the existing one.',
+    zh: '保存后将替换已存储的密码。清空此框可保留原密码。',
+  },
   'src.privateAddress': {
     en: 'That is a private address, and Hearth’s server runs on Cloudflare’s edge, so it cannot reach your local network. Expose the service publicly over HTTPS, or use a source type that supports Direct access.',
     zh: '这是内网地址，而 Hearth 服务器运行在 Cloudflare 边缘节点，无法访问你的局域网。请将服务通过 HTTPS 暴露到公网，或改用支持直连的媒体源类型。',

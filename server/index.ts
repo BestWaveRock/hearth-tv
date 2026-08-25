@@ -576,8 +576,11 @@ api.get('/search', requireAuth, async (c) => {
   const vault = await getVault(c);
   const rows = await fetchSourceRows(c.env, user.id);
 
+  // Direct sources are searched by the browser, for the same reason as above.
   const perSource = await Promise.allSettled(
-    rows.map(async (row) => {
+    rows
+      .filter((row) => (row.access ?? 'proxy') !== 'direct')
+      .map(async (row) => {
       const creds = await unseal<Credentials>(vault, row.secret_blob);
       const ctx = contextFromRow(row, creds);
       const adapter = adapterFor(ctx.kind);
@@ -682,8 +685,17 @@ api.get('/home', requireAuth, async (c) => {
     });
   }
 
+  /**
+   * Direct-mode sources are the browser's job.
+   *
+   * Self-hosted, this server often *can* reach a LAN address — so without this
+   * filter it would build shelves the browser is also building, and Home would
+   * show every direct source twice.
+   */
+  const proxyRows = rows.filter((row) => (row.access ?? 'proxy') !== 'direct');
+
   const sourceShelves = await Promise.allSettled(
-    rows.map(async (row) => {
+    proxyRows.map(async (row) => {
       const creds = await unseal<Credentials>(vault, row.secret_blob);
       const ctx = contextFromRow(row, creds);
       const adapter = adapterFor(ctx.kind);
@@ -718,8 +730,8 @@ api.get('/home', requireAuth, async (c) => {
     if (r.status === 'fulfilled') shelves.push(...r.value);
     else {
       problems.push({
-        sourceId: rows[i].id,
-        name: rows[i].name,
+        sourceId: proxyRows[i].id,
+        name: proxyRows[i].name,
         message: r.reason instanceof Error ? r.reason.message : 'Unavailable right now.',
       });
     }

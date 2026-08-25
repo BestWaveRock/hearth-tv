@@ -34,11 +34,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck both projects
+      - name: Typecheck every project
         run: npm run typecheck
 
       - name: Spatial navigation tests
         run: npm run test:focus
+
+      - name: Reachability rule tests
+        run: npm run test:reach
+
+      - name: Bundle the self-hosted server
+        run: npm run build:server
 
       - name: Build
         run: npm run build
@@ -127,13 +133,15 @@ jobs:
 
       - name: Apply database migrations
         if: steps.creds.outputs.ready == 'true'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # The schema uses IF NOT EXISTS throughout, so re-running it on every
-          # deploy is safe and keeps a fresh database in step.
-          command: d1 execute hearth-tv --remote --file=./schema.sql
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        # Not a bare `d1 execute --file=schema.sql`. The schema uses
+        # CREATE TABLE IF NOT EXISTS, which does nothing to a table that already
+        # exists — so a column added in a later release would never reach a
+        # deployed database. The runner inspects the live schema with
+        # PRAGMA table_info and applies only what is genuinely missing.
+        run: node tools/migrate.mjs --remote
 
       - name: Deploy Worker and assets
         if: steps.creds.outputs.ready == 'true'
