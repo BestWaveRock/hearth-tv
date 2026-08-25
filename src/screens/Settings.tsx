@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ACTION_LABELS, prettyKeyLabel } from '../input/defaults';
 import { input } from '../input/manager';
 import type { DriverState, RawSignal } from '../input/types';
+import { Field } from '../components/Field';
 import { Button, Chip, Row, Spinner } from '../components/primitives';
-import { FocusGroup } from '../focus';
-import { api } from '../lib/api';
+import { FocusGroup, FocusScope } from '../focus';
+import { ApiError, api } from '../lib/api';
+import { useDismissable } from '../lib/dismiss';
 import { useT } from '../lib/i18n';
 import { useApp } from '../store/app';
 import { CalibrationWizard, PhonePairing } from './Pairing';
@@ -31,6 +33,11 @@ export function SettingsScreen() {
   const [recent, setRecent] = useState<RawSignal[]>([]);
   const [health, setHealth] = useState<{ ok: boolean; checks: Record<string, string> } | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Stable, for the same reason as in the pairing screen: the calibration
+  // wizard's save effect depends on this callback's identity.
+  const backToMain = useCallback(() => setPane('main'), []);
 
   useEffect(() => input.onDriverStates(setStates), []);
 
@@ -51,10 +58,10 @@ export function SettingsScreen() {
   }, []);
 
   if (pane === 'calibrate') {
-    return <CalibrationWizard onDone={() => setPane('main')} onCancel={() => setPane('main')} />;
+    return <CalibrationWizard onDone={backToMain} onCancel={backToMain} />;
   }
   if (pane === 'phone') {
-    return <PhonePairing onDone={() => setPane('main')} />;
+    return <PhonePairing onDone={backToMain} />;
   }
 
   const mapping = input.getMapping();
@@ -280,9 +287,14 @@ export function SettingsScreen() {
             <Button variant="danger" onSelect={() => void signOut()}>
               {t('set.signOut')}
             </Button>
+            <Button variant="ghost" onSelect={() => setDeleting(true)}>
+              {t('set.deleteAccount')}
+            </Button>
           </div>
         </FocusGroup>
       </section>
+
+      {deleting ? <DeleteAccountDialog onClose={() => setDeleting(false)} /> : null}
 
       {/* ------------------------------- About ------------------------------ */}
       <section className="pad-gutter mt-lg stack stack-sm">
@@ -301,6 +313,77 @@ export function SettingsScreen() {
       </section>
 
       <div style={{ height: '4vh' }} />
+    </div>
+  );
+}
+
+/**
+ * Account deletion, behind a password prompt.
+ *
+ * A confirmation dialog alone is not enough here: on a TV the OK button is
+ * pressed constantly and a stolen session cookie should not be able to destroy
+ * someone's library, so the server re-verifies the password before deleting.
+ */
+function DeleteAccountDialog({ onClose }: { onClose: () => void }) {
+  const t = useT();
+  const toast = useApp((s) => s.toast);
+  const signOut = useApp((s) => s.signOut);
+
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useDismissable(onClose, !busy);
+
+  const confirm = async () => {
+    if (!password) {
+      setError(t('set.deleteConfirmPassword'));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteAccount(password);
+      toast(t('set.deleteDone'), 'good');
+      // The account is gone; drop all local state and return to sign-in.
+      await signOut();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not delete the account.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="scrim" role="dialog" aria-modal="true" aria-label={t('set.deleteTitle')}>
+      <FocusScope name="delete-account">
+        <div className="dialog glass panel" style={{ width: 'min(560px, 92vw)' }}>
+          <header className="stack stack-xs">
+            <p className="t-label">{t('set.deleteAccount')}</p>
+            <h2 className="t-title">{t('set.deleteTitle')}</h2>
+            <p className="t-body">{t('set.deleteBody')}</p>
+          </header>
+
+          <Field
+            label={t('set.deleteConfirmPassword')}
+            value={password}
+            onChange={setPassword}
+            kind="password"
+            priority={8}
+          />
+
+          {error ? <p className="field__error">{error}</p> : null}
+
+          <div className="dialog__actions">
+            <Button variant="ghost" priority={10} onSelect={onClose} disabled={busy}>
+              {t('set.deleteCancel')}
+            </Button>
+            <Button variant="danger" onSelect={() => void confirm()} disabled={busy}>
+              {busy ? <Spinner /> : null}
+              {t('set.deleteConfirm')}
+            </Button>
+          </div>
+        </div>
+      </FocusScope>
     </div>
   );
 }

@@ -58,6 +58,13 @@ export function PairingScreen() {
   const [bleUuid, setBleUuid] = useState(() => BluetoothDriver.customUuid());
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Stable identities. These are passed to the calibration wizard, whose
+  // completion effect keys on them; rebuilding them on every render is what
+  // caused the wizard to re-save (and re-toast) repeatedly.
+  const backToDetect = useCallback(() => setStage('detect'), []);
+  const goToPhone = useCallback(() => setStage('phone'), []);
+  const goToCalibrate = useCallback(() => setStage('calibrate'), []);
+
   useEffect(() => input.onDriverStates(setStates), []);
 
   // A live read-out of raw presses. This is what turns "it doesn't work" into
@@ -92,15 +99,12 @@ export function PairingScreen() {
 
   if (stage === 'calibrate') {
     return (
-      <CalibrationWizard
-        onDone={() => setStage('detect')}
-        onCancel={() => setStage('detect')}
-      />
+      <CalibrationWizard onDone={backToDetect} onCancel={backToDetect} />
     );
   }
 
   if (stage === 'phone') {
-    return <PhonePairing onDone={() => setStage('detect')} />;
+    return <PhonePairing onDone={backToDetect} />;
   }
 
   return (
@@ -147,7 +151,7 @@ export function PairingScreen() {
                 busy={busy === state.id}
                 onConnect={
                   state.id === 'phone'
-                    ? () => setStage('phone')
+                    ? goToPhone
                     : state.needsPermission
                       ? () => void connect(state.id)
                       : undefined
@@ -185,10 +189,10 @@ export function PairingScreen() {
             >
               {user ? t('pair.continue') : t('pair.continueSignIn')}
             </Button>
-            <Button variant="ghost" onSelect={() => setStage('calibrate')} disabled={!ready}>
+            <Button variant="ghost" onSelect={goToCalibrate} disabled={!ready}>
               {t('pair.calibrate')}
             </Button>
-            <Button variant="ghost" onSelect={() => setStage('phone')}>
+            <Button variant="ghost" onSelect={goToPhone}>
               {t('pair.usePhone')}
             </Button>
             <Button variant="ghost" onSelect={() => setShowAdvanced((v) => !v)}>
@@ -275,6 +279,11 @@ export function CalibrationWizard({
   const [mapping, setMapping] = useState<Record<string, RemoteAction>>({});
   const [conflict, setConflict] = useState<string | null>(null);
   const cancelCapture = useRef<(() => void) | null>(null);
+  /** Latest mapping, so the capture effect need not re-register on every press. */
+  const mappingRef = useRef(mapping);
+  mappingRef.current = mapping;
+  /** Guarantees the save runs exactly once. See the effect below. */
+  const savedRef = useRef(false);
 
   const action = WIZARD_STEPS[step];
   const isOptional = step >= REQUIRED_ACTIONS.length;
@@ -295,7 +304,7 @@ export function CalibrationWizard({
     setConflict(null);
     cancelCapture.current?.();
     cancelCapture.current = input.captureNextSignal((signal) => {
-      const existing = mapping[signal.code];
+      const existing = mappingRef.current[signal.code];
       if (existing && existing !== action) {
         setConflict(t('pair.conflict', { action: ACTION_LABELS[existing] }));
         return;
@@ -304,15 +313,15 @@ export function CalibrationWizard({
       setStep((s) => s + 1);
     });
     return () => cancelCapture.current?.();
-  }, [step, action, done, mapping, t]);
+  }, [step, action, done, t]);
 
   const save = useCallback(async () => {
-    input.setMapping(mapping);
+    input.setMapping(mappingRef.current);
     try {
       const res = await api.saveRemoteProfile({
         name: 'My Remote',
         driver: input.rememberedDriver() ?? 'keyboard',
-        mapping,
+        mapping: mappingRef.current,
       });
       setRemoteProfiles(res.profiles);
       toast(t('pair.savedAccount'), 'good');
@@ -321,10 +330,21 @@ export function CalibrationWizard({
       toast(t('pair.savedLocal'), 'neutral');
     }
     onDone();
-  }, [mapping, onDone, setRemoteProfiles, toast, t]);
+  }, [onDone, setRemoteProfiles, toast, t]);
 
+  /**
+   * Fire the save exactly once.
+   *
+   * The ref guard is load-bearing, not defensive. `save` changes identity
+   * whenever `onDone` does, and the parent screens rebuild `onDone` on every
+   * render — the pairing screen re-renders on every driver-state update and
+   * every raw button press. Without the guard, each of those re-ran this effect
+   * and produced another "calibrated" toast, forever.
+   */
   useEffect(() => {
-    if (done) void save();
+    if (!done || savedRef.current) return;
+    savedRef.current = true;
+    void save();
   }, [done, save]);
 
   const progress = useMemo(

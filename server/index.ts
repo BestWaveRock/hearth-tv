@@ -14,7 +14,9 @@ import {
   type SourceSummary,
 } from '../shared/types';
 import type { AppEnv, Env } from './env';
+import { deleteCookie } from 'hono/cookie';
 import {
+  SESSION_COOKIE,
   createUser,
   getVault,
   issueSession,
@@ -140,6 +142,41 @@ api.post('/auth/login', async (c) => {
 
 api.post('/auth/logout', optionalAuth, async (c) => {
   await revokeSession(c);
+  return c.json({ ok: true });
+});
+
+/**
+ * Deletes the signed-in account and everything belonging to it.
+ *
+ * Anyone who can create an account should be able to remove it — both because
+ * it is the decent default and because a self-hosted box otherwise accumulates
+ * accounts that can never be revoked from inside the product.
+ *
+ * The password is required so that a stolen session cookie cannot destroy the
+ * library. Every child table declares ON DELETE CASCADE, so removing the user
+ * row takes sessions, sources, progress, favourites, settings and remote
+ * profiles with it.
+ */
+api.delete('/me', requireAuth, async (c) => {
+  const user = c.get('user');
+  const body = await c.req.json<{ password?: unknown }>().catch(() => ({ password: undefined }));
+  const password = typeof body.password === 'string' ? body.password : '';
+
+  if (!password) {
+    throw new HTTPException(400, { message: 'Enter your password to delete this account.' });
+  }
+  // Throws 401 on a mismatch, in constant time.
+  await verifyLogin(c, user.username, password);
+
+  // Belt and braces: D1 honours foreign keys, but an older database created
+  // before a schema change might not, and a half-deleted account is worse
+  // than a clear error.
+  for (const table of ['sessions', 'sources', 'progress', 'favorites', 'remote_profiles', 'settings']) {
+    await c.env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(user.id).run();
+  }
+  await c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(user.id).run();
+
+  deleteCookie(c, SESSION_COOKIE, { path: '/' });
   return c.json({ ok: true });
 });
 

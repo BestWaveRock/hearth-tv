@@ -107,6 +107,9 @@ export const api = {
   login: (username: string, password: string) =>
     post<{ user: User; settings: Settings }>('/api/auth/login', { username, password }),
   logout: () => post<{ ok: true }>('/api/auth/logout'),
+  /** Irreversible. Requires the password so a stolen cookie cannot do this. */
+  deleteAccount: (password: string) =>
+    request<{ ok: true }>('/api/me', { method: 'DELETE', body: JSON.stringify({ password }) }),
 
   saveSettings: (patchBody: Partial<Settings>) =>
     patch<{ settings: Settings }>('/api/me/settings', patchBody),

@@ -337,6 +337,16 @@ const settings = {
   'set.encryptionKey': { en: 'encryption key', zh: '加密密钥' },
   'set.checkingServer': { en: 'Checking the server…', zh: '正在检查服务器…' },
   'set.signOut': { en: 'Sign out', zh: '退出登录' },
+  'set.deleteAccount': { en: 'Delete account', zh: '删除账户' },
+  'set.deleteTitle': { en: 'Delete this account?', zh: '确定删除此账户？' },
+  'set.deleteBody': {
+    en: 'This removes your account, every connected data source, your resume points and your remote calibration. Files on your servers are never touched. This cannot be undone.',
+    zh: '这将删除你的账户、所有已连接的媒体源、观看进度和遥控器校准。服务器上的文件不会被改动。此操作无法撤销。',
+  },
+  'set.deleteConfirmPassword': { en: 'Confirm with your password', zh: '请输入密码确认' },
+  'set.deleteConfirm': { en: 'Delete permanently', zh: '永久删除' },
+  'set.deleteCancel': { en: 'Keep my account', zh: '保留账户' },
+  'set.deleteDone': { en: 'Account deleted.', zh: '账户已删除。' },
   'set.about': { en: 'About', zh: '关于' },
   'set.aboutBody': {
     en: 'Hearth is a television interface that runs in a browser tab and is driven by a remote control. Nothing is installed and nothing is transcoded — your files stream from your own storage.',
