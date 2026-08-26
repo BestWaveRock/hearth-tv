@@ -114,7 +114,9 @@ losing it makes saved data-source passwords unreadable.
 
 #### Apple `container` (no Docker Desktop needed)
 
-Apple's own container runtime on macOS 15+ runs the same image:
+Apple's own container runtime on macOS 15+ runs the same image — verified end to end with
+`container` 1.3.0, including media actually streaming off an OpenList and a Navidrome
+running as neighbouring containers.
 
 ```bash
 container system start
@@ -124,8 +126,18 @@ container run -d --name hearth \
   ghcr.io/bestwaverock/hearth-tv:latest
 ```
 
-To reach it from other devices on your network, publish on all interfaces and use the
-machine's LAN address, e.g. `http://192.168.3.10:8788`.
+Three things worth knowing, all tested the hard way:
+
+1. **The volume must be writable, and Apple mounts fresh volumes as root.** The entry
+   point starts as root only to hand `/data` to `node`, then drops privileges. Without
+   that step the database crash-loops with `SQLITE_CANTOPEN`.
+2. **Both access modes work** — the container's VM routes to your LAN fine (confirmed
+   against servers at `192.168.3.148`). Direct mode is still preferable: it skips a hop.
+   If you ever bind-mount instead of using a named volume, add
+   `--user "$(id -u):$(id -g)"`, because host ownership cannot be changed through virtiofs.
+3. **Your other containers live on `192.168.64.0/24`.** From browsers on this Mac they are
+   reachable directly at addresses like `http://192.168.64.18:5244`; from *other* devices
+   use the Mac's LAN address, e.g. `http://192.168.3.10:8788`.
 
 #### Docker Compose
 
@@ -169,6 +181,11 @@ open -a dist-macos/Hearth.app --args --url http://192.168.3.10:8788
 open -a dist-macos/Hearth.app --args --windowed        # skip fullscreen
 ./macos/build.sh --universal                           # arm64 + x86_64
 ```
+
+Images are published automatically by GitHub Actions to GHCR on every push to `main`
+(multi-arch: amd64 + arm64). The workflow also mirrors to Docker Hub if you add
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets; without them it publishes
+to GHCR only, which needs no extra credentials at all.
 
 ### 3. Hosted on Cloudflare
 

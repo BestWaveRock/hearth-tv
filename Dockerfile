@@ -12,6 +12,11 @@
 # SQLite comes from `node:sqlite`, which is built into Node. That is the reason
 # this image needs no build toolchain and works identically on Apple silicon and
 # on x86.
+#
+# Deliberately no apk packages in the runtime stage: tini and su-exec failed to
+# fetch inside Apple's build VM. Node handles SIGTERM itself (server-node/index.ts
+# installs handlers), and busybox `su` drops privileges — so the base image alone
+# is enough and every build is reproducible offline.
 # ---------------------------------------------------------------------------
 
 FROM node:24-alpine AS builder
@@ -32,18 +37,16 @@ RUN npm run build && npm run build:server
 
 FROM node:24-alpine AS runtime
 
-# Tini reaps zombies and forwards signals, so `docker stop` is instant and
-# clean rather than waiting out a 10-second SIGKILL timeout.
-RUN apk add --no-cache tini
-
 WORKDIR /app
 
 COPY --from=builder /build/dist            ./dist
 COPY --from=builder /build/dist-server     ./dist-server
 COPY --from=builder /build/schema.sql      ./schema.sql
+COPY docker-entrypoint.sh                  /usr/local/bin/docker-entrypoint.sh
 
 # The database and the credential-vault key live here. Mount it to keep them.
-RUN mkdir -p /data && chown -R node:node /data /app
+RUN mkdir -p /data && chown -R node:node /data /app \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV NODE_ENV=production \
     PORT=8788 \
@@ -54,14 +57,11 @@ ENV NODE_ENV=production \
 EXPOSE 8788
 VOLUME ["/data"]
 
-# Never run as root: this process is reachable from every device on the network.
-USER node
+# The entry point starts as root only to hand /data to `node`, then drops
+# privileges — see docker-entrypoint.sh. Apple's container runtime mounts fresh
+# named volumes as root, so a plain USER directive would crash-loop on SQLite.
 
-# Plain HTTP by design — see the note printed at start-up. An HTTPS page cannot
-# talk to a LAN server, so serving locally over HTTP is what makes Direct mode
-# work at all.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8788)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "dist-server/hearth.mjs"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
